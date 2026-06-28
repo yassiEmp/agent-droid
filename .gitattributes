@@ -1,0 +1,13 @@
+# Keep LF on executable scripts so shebangs work on Linux/macOS.
+*.mjs    text eol=lf
+*.js     text eol=lf
+gradlew  text eol=lf
+*.sh     text eol=lf
+
+# Windows batch stays CRLF.
+*.cmd    text eol=crlf
+*.bat    text eol=crlf
+
+# APKs are binary.
+*.apk    binary
+*.jar    binary

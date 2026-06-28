@@ -1,0 +1,15 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Gradle / Android build output (dumper APKs are vendored in cli/vendor/)
+dumper/.gradle/
+dumper/build/
+dumper/app/build/
+dumper/local.properties
+*.iml
+.idea/
+
+# Scratch
+droid-shot.png
+*.log

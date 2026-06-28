@@ -1,0 +1,46 @@
+{
+  "name": "agent-droid",
+  "version": "0.1.0",
+  "description": "An agent-browser for Android: drive a real device or emulator over adb with a snapshot → ref → act loop. Animation-proof UI snapshots, text or ref targeting, JSON output — built for AI agents and humans.",
+  "type": "module",
+  "bin": {
+    "agent-droid": "cli/droid.mjs",
+    "droid": "cli/droid.mjs"
+  },
+  "files": [
+    "cli/droid.mjs",
+    "cli/lib.mjs",
+    "cli/vendor/*.apk",
+    "dumper/**/*",
+    "!dumper/build",
+    "!dumper/.gradle",
+    "MAINTAINING.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "doctor": "node cli/droid.mjs doctor",
+    "help": "node cli/droid.mjs --help"
+  },
+  "keywords": [
+    "android",
+    "adb",
+    "uiautomator",
+    "automation",
+    "agent",
+    "ai-agent",
+    "react-native",
+    "e2e",
+    "cli",
+    "accessibility-tree"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yassiEmp/agent-droid.git"
+  },
+  "dependencies": {}
+}
