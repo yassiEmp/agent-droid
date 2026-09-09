@@ -11,9 +11,6 @@
     "cli/droid.mjs",
     "cli/lib.mjs",
     "cli/vendor/*.apk",
-    "dumper/**/*",
-    "!dumper/build",
-    "!dumper/.gradle",
     "MAINTAINING.md",
     "README.md",
     "LICENSE"
