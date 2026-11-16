@@ -62,6 +62,20 @@ Or run without installing:
 npx agent-droid doctor
 ```
 
+## Remote mode: Wi-Fi or 4G, no cable
+
+Same commands, phone anywhere. Install the small **agent-droid Link** app on the
+phone (it dials out to your relay, so it works on 4G and survives reboots), run
+`agent-droid relay` on any always-on box, then:
+
+```bash
+agent-droid --remote https://<relay> --token "$T" snapshot
+agent-droid --remote https://<relay> --token "$T" tap "Sign In"
+agent-droid --remote adb://100.x.y.z:5555 logs      # fallback: adb over Tailscale
+```
+
+Setup takes about 2 minutes on the phone with no computer. See **[REMOTE.md](./REMOTE.md)**.
+
 ## The loop
 
 1. `agent-droid snapshot` — print the interactive elements as `@eN` refs.
@@ -85,6 +99,11 @@ npx agent-droid doctor
 | `current` | Foreground `package/activity`. |
 | `logs [filter] [tail]` | Tail app logcat. `--tag <T>` (default `ReactNativeJS`; `'*'` = all). |
 | `screenshot [file]` | Save a PNG (default `droid-shot.png`). |
+| `open <package\|url>` | Launch an app, or open a URL / deep link. |
+| `wake` | Turn the screen on. |
+| `devices` | List devices (in remote link mode: connected phones). |
+| `relay` | Run the remote-mode relay ([REMOTE.md](./REMOTE.md)). |
+| `pair` / `tcpip` | adb wireless pairing / network mode for remote adb. |
 | `--help` | Full reference. |
 
 ### Targeting: refs vs. text
@@ -98,6 +117,9 @@ duplicated.
 ### Flags
 
 - `--serial <id>` — target a specific device (default: first online).
+- `--remote <url>` — remote mode: `https://relay` (Link app) or `adb://ip:5555`.
+  Or set `AGENT_DROID_REMOTE` (and `AGENT_DROID_TOKEN`) once.
+- `--token <T>` — the relay token for link mode.
 - `--tag <T>` — logcat tag for `logs` (default `ReactNativeJS`; `'*'` for all).
 - `--json` — machine-readable output (no human text); ideal for agents.
 - `--then` — **off by default.** After an action, re-snapshot and print the new
@@ -116,6 +138,8 @@ agent-droid snapshot --json | node -e 'JSON.parse(require("fs").readFileSync(0))
 ## Limitations
 
 - **iOS is not supported** — `adb` is Android-only.
+- **Remote link mode:** no `logs` or raw keycodes (use remote adb for those);
+  screenshots need Android 11+; a PIN/pattern lock stays the human's job.
 - **Soft-keyboard occlusion:** when the IME covers a field, the dump may return
   only the keyboard window; `type` then falls back to cached coordinates. Dismiss
   the keyboard or scroll the field into view if a `type` doesn't land.

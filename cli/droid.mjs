@@ -114,6 +114,7 @@ WORKFLOW
 
 COMMANDS
   doctor                 List devices, foreground app, and dumper status. Never throws.
+  devices                List devices (link mode: phones connected to the relay).
   setup                  One-time per device: install the animation-proof dumper.
   snapshot [query]       Dump the accessibility tree as @eN refs; [query] filters by name substring.
   tap <@eN | "text" | X Y>   Tap a ref, a visible-text match, or raw coordinates.
