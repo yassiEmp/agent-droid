@@ -66,11 +66,16 @@ $DROID swipe up
 $DROID swipe down
 
 step "type Unicode into Settings search"
-$DROID tap "Search settings" || $DROID tap "Search" || fail "no search field"
-sleep 1.5
-SNAP=$($DROID snapshot)
+FIELD=""
+for attempt in 1 2 3; do   # the home screen may still be settling after the swipes
+  sleep 1
+  $DROID tap "Search settings" || $DROID tap "Search" || true
+  sleep 2
+  SNAP=$($DROID snapshot)
+  FIELD=$(echo "$SNAP" | grep '\[input\]' | head -1 | cut -d' ' -f1)
+  [ -n "$FIELD" ] && break
+done
 echo "$SNAP"
-FIELD=$(echo "$SNAP" | grep '\[input\]' | head -1 | cut -d' ' -f1)
 [ -n "$FIELD" ] || fail "no input field after opening search"
 $DROID type "$FIELD" "wifi café"
 $DROID wait "café" 8000 || fail "typed text not on screen"
