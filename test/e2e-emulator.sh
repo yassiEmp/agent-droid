@@ -95,9 +95,8 @@ $DROID current
 
 step "remote adb transport (adb over the network)"
 unset AGENT_DROID_REMOTE
-adb tcpip 5555 || true
-sleep 3
-adb connect 127.0.0.1:5555 || true
+# The emulator already exposes adbd on 127.0.0.1:5555, the same thing a real
+# phone does after `agent-droid tcpip`, so this checks the network adb path.
 $DROID --remote adb://127.0.0.1:5555 doctor | tee "$OUT/adb-doctor.txt"
 grep -q "remote-adb" "$OUT/adb-doctor.txt" || fail "remote adb doctor"
 $DROID --remote adb://127.0.0.1:5555 current || fail "remote adb current"
