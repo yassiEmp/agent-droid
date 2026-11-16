@@ -194,8 +194,41 @@ final class Commands {
     return f;
   }
 
-  private Object setFocusedText(String text, boolean append) {
-    AccessibilityNodeInfo f = focusedInput();
+  // The field that should receive text. Right after a tap, focus can take a
+  // moment to land (keyboards and search screens animate in), so wait briefly;
+  // if nothing reports input focus, fall back to the only editable field on
+  // screen and focus it ourselves.
+  private AccessibilityNodeInfo inputTarget() throws InterruptedException {
+    for (int i = 0; i < 8; i++) {
+      AccessibilityNodeInfo f = focusedInput();
+      if (f != null && f.isEditable()) return f;
+      Thread.sleep(150);
+    }
+    AccessibilityNodeInfo only = null;
+    int count = 0;
+    AccessibilityNodeInfo root = svc.getRootInActiveWindow();
+    java.util.ArrayDeque<AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+    if (root != null) q.add(root);
+    while (!q.isEmpty() && count < 2) {
+      AccessibilityNodeInfo n = q.poll();
+      if (n.isEditable() && n.isVisibleToUser()) {
+        only = n;
+        count++;
+      }
+      for (int i = 0; i < n.getChildCount(); i++) {
+        AccessibilityNodeInfo c = n.getChild(i);
+        if (c != null) q.add(c);
+      }
+    }
+    if (count == 1) {
+      only.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+      return only;
+    }
+    return focusedInput();
+  }
+
+  private Object setFocusedText(String text, boolean append) throws InterruptedException {
+    AccessibilityNodeInfo f = inputTarget();
     if (f == null) throw new IllegalStateException("no text field is focused: tap the field first");
     String current = "";
     if (append && f.getText() != null) {

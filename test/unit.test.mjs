@@ -34,7 +34,7 @@ test("refsFromXml: interactive elements become @eN refs", () => {
       ["e1", "input", "Email"],
       ["e2", "input", "Password"],
       ["e3", "button", "Sign In"],
-      ["e4", "button", "Sign In with Google"],
+      ["e4", "button", "Sign In with Google & more"],
     ],
   );
   assert.equal(refs[1].sig.password, true);
@@ -46,7 +46,7 @@ test("matchLive: re-finds a ref by identity after a layout shift", () => {
   const shifted = XML.replace("[100,2740][1340,2884]", "[100,1740][1340,1884]");
   const hit = matchLive(allNodes(shifted), refs[3]);
   assert.deepEqual(hit, { cx: 720, cy: 1812, stale: false });
-  const gone = matchLive(allNodes(XML.replace(/Sign In with Google/g, "Other")), refs[3]);
+  const gone = matchLive(allNodes(XML.replace(/Sign In with Google &amp; more/g, "Other")), refs[3]);
   assert.equal(gone.stale, true);
 });
 

@@ -188,11 +188,24 @@ async function dumpXml(serial) {
   throw err;
 }
 
+// Both uiautomator and the Link app XML-escape attribute values; decode them so
+// names read "Network & internet" (and text targeting matches what's on screen).
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+function unescapeXml(v) {
+  return v.indexOf("&") === -1
+    ? v
+    : v.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (m, e) =>
+        e[0] === "#"
+          ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : Number(e.slice(1)))
+          : ENTITIES[e.toLowerCase()],
+      );
+}
+
 export function allNodes(xml) {
   const nodes = [];
   for (const tag of xml.match(/<node\b[^>]*>/g) || []) {
     const attrs = {};
-    for (const [, k, v] of tag.matchAll(/([\w-]+)="([^"]*)"/g)) attrs[k] = v;
+    for (const [, k, v] of tag.matchAll(/([\w-]+)="([^"]*)"/g)) attrs[k] = unescapeXml(v);
     const bounds = parseBounds(attrs.bounds || "");
     if (!bounds) continue;
     nodes.push({ ...attrs, bounds });

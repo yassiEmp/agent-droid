@@ -81,7 +81,7 @@ test("link mode: relay + fake phone + real CLI", async (t) => {
 
   r = await cli(relay.port, "snapshot", "--json");
   const refs = JSON.parse(r.stdout);
-  assert.deepEqual(refs.map((x) => x.name), ["Email", "Password", "Sign In", "Sign In with Google"]);
+  assert.deepEqual(refs.map((x) => x.name), ["Email", "Password", "Sign In", "Sign In with Google & more"]);
 
   calls.length = 0;
   r = await cli(relay.port, "tap", "Sign In", "--json");
