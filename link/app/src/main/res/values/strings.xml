@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">agent-droid Link</string>
+  <string name="service_name">agent-droid Link</string>
+  <string name="service_description">Lets your own AI agent see and use this phone remotely through your agent-droid relay: it reads the screen, taps, swipes, types and takes screenshots only when your relay asks. Nothing is sent anywhere else. Turn this off to stop all remote control.</string>
+</resources>

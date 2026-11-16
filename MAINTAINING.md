@@ -11,11 +11,22 @@ agent-droid/
 ├── package.json             # npm package; `bin` exposes `agent-droid` + `droid`
 ├── cli/
 │   ├── droid.mjs            # CLI entry: arg parsing + command dispatch (has the shebang)
-│   ├── lib.mjs              # engine: dump transports, ref model, act primitives
+│   ├── lib.mjs              # engine: dump transports, ref model, act primitives (adb | link)
+│   ├── remote.mjs           # --remote: link client (HTTP → relay) + remote-adb helpers
+│   ├── relay.mjs            # `agent-droid relay`: phones dial in (WS), CLI calls in (HTTP)
+│   ├── ws.mjs               # zero-dep RFC 6455 server side used by the relay
 │   └── vendor/
 │       ├── droid-dumper-app.apk    # empty host app (instrumentation target)
 │       └── droid-dumper-test.apk   # the instrumentation test (the actual dumper)
-└── dumper/                  # standalone Gradle SOURCE for the two APKs above
+├── dumper/                  # standalone Gradle SOURCE for the two APKs above
+├── link/                    # agent-droid Link: the remote-mode companion app (Gradle, Java)
+│   └── app/src/main/java/dev/agentdroid/link/
+│       ├── LinkService.java # AccessibilityService; owns the outbound WebSocket + reconnects
+│       ├── Commands.java    # dump/tap/swipe/type/key/screenshot/open/wake/info handlers
+│       ├── TreeDumper.java  # accessibility tree → uiautomator-schema XML
+│       └── MainActivity.java# status + setup steps; handles agentdroid://link deep links
+├── test/                    # node --test unit + relay e2e; e2e-emulator.sh for CI
+└── ci/remote.yml            # CI (lives in .github/workflows/): tests, APK, emulator e2e
     ├── settings.gradle, build.gradle, gradle.properties
     ├── gradlew(.bat), gradle/wrapper/
     └── app/
@@ -44,6 +55,41 @@ hierarchy XML. It tries three transports in order, retrying the set 4× with a
 If all fail it throws an `Error` with `err.code = "UI_ANIMATED"`. All transports
 emit the **same XML schema** (`<hierarchy><node .../></hierarchy>`), so the parser
 (`allNodes`) and ref model never change when transports change.
+
+## Remote mode (link transport)
+
+`lib.mjs` keeps ONE engine. `useLink(link)` swaps the adb primitives for calls
+to the relay; the ref model, text targeting and `resolveLive` are untouched
+because the Link app emits **the uiautomator XML schema** (`TreeDumper.java`).
+Every exported lib function is `async` so both transports share one surface.
+
+Wire protocol (relay ⇄ phone, JSON text frames):
+
+```
+phone → relay   {"type":"hello","name":"sm-g975u","model":…,"android":"12","sdk":31,"app":"0.1.0"}
+relay → phone   {"id":7,"method":"tap","params":{"x":540,"y":1200}}
+phone → relay   {"id":7,"ok":true,"result":true}     |  {"id":7,"ok":false,"error":"…"}
+```
+
+Methods: `ping info dump tap press swipe clear type key current screenshot open wake`.
+CLI → relay is `POST /rpc {device?, method, params}` with `Authorization: Bearer <token>`.
+
+Invariants for remote mode:
+- The Link app must keep emitting the uiautomator schema; never add a link-only parser.
+- The relay stays dependency-free (`ws.mjs`), like the rest of the CLI.
+- The phone always dials out; never add a listening socket on the phone.
+- New phone methods must fail with a clear message on old app versions
+  (`unknown command "x" (update agent-droid Link?)`).
+
+Building the Link APK locally: `cd link && ./gradlew :app:assembleRelease`
+(JDK 17 + Android SDK; signed with the debug key unless `LINK_KEYSTORE_FILE` /
+`LINK_KEYSTORE_PASSWORD` are set). CI builds and signs it from repo secrets and
+publishes it to the `link-latest` release on every push to `master`.
+
+Tests: `node --test test/*.test.mjs` (parser, ws framing, relay + fake phone +
+real CLI). `test/e2e-emulator.sh` runs the real APK on an Android 12 emulator in
+CI: Link transport (snapshot, text tap, BACK, swipe, Unicode typing, screenshot,
+open, relay restart + auto-reconnect) and the remote-adb transport.
 
 ## The instrumentation dumper (the non-obvious part)
 
@@ -130,9 +176,10 @@ A passing test with **no `droiddump` block** means `sendStatus`/sentinels broke.
 A `FAILURES!!!` with a file/IO stack trace means a file-write path was
 reintroduced (see scoped-storage note above).
 
-There is no automated unit suite yet; the device smoke test is the gate. A good
-first suite would target `lib.mjs`'s pure functions (`parseBounds`, `allNodes`,
-`nameFor`, `resolveLive`) against a captured XML fixture.
+Unit suite: `node --test test/*.test.mjs` covers `lib.mjs`'s pure functions
+(`parseBounds`, `allNodes`, `nameFor`, `refsFromXml`, `matchLive`) against
+`test/fixtures/login.xml`, plus the relay. The device smoke test is still the
+gate for adb changes.
 
 ## Debugging guide
 

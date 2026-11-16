@@ -7,6 +7,12 @@ dumper/.gradle/
 dumper/build/
 dumper/app/build/
 dumper/local.properties
+link/.gradle/
+link/build/
+link/app/build/
+link/local.properties
+e2e-artifacts/
+agent-droid-link.apk
 *.iml
 .idea/
 

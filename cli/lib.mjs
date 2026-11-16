@@ -5,6 +5,15 @@
 // IDENTITY-BASED re-resolution: a ref remembers a node's text/desc/class, and
 // every act() re-dumps the tree and re-finds that node's CURRENT bounds — so a
 // soft-keyboard layout shift or a hot-reload reflow can't make a tap miss.
+//
+// Two transports share this one engine:
+//   - adb (default, also used for remote adb over Tailscale: the device is just
+//     an `ip:port` serial), and
+//   - link (remote mode): the agent-droid Link companion app on the phone keeps
+//     an outbound WebSocket to `agent-droid relay`; every primitive below is
+//     forwarded to it. The phone emits the SAME hierarchy XML schema as
+//     uiautomator, so the ref model / parser never changes per transport.
+// Every exported function is async so both transports share one call surface.
 
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -29,6 +38,13 @@ const DUMP_END = "<<<DROID_DUMP_END>>>";
 // `ReactNativeJS`; override per-call with `logs --tag <TAG>` (or `*` for all).
 const DEFAULT_LOG_TAG = "ReactNativeJS";
 
+// Remote "link" transport (set by the CLI with useLink). null = plain adb.
+let LINK = null;
+export function useLink(link) {
+  LINK = link;
+}
+export const isLink = () => LINK !== null;
+
 const KEYS = {
   BACK: 4,
   HOME: 3,
@@ -51,7 +67,8 @@ function adbRaw(serial, args) {
   });
 }
 
-export function pickDevice(explicit) {
+export async function pickDevice(explicit) {
+  if (LINK) return LINK.pickDevice(explicit);
   const out = execFileSync("adb", ["devices"], { encoding: "utf8" });
   const devices = out
     .split("\n")
@@ -71,9 +88,10 @@ export function pickDevice(explicit) {
   return devices[0];
 }
 
-const cachePath = (serial) => join(tmpdir(), `droid-refs-${serial || "default"}.json`);
+const cachePath = (serial) =>
+  join(tmpdir(), `droid-refs-${String(serial || "default").replace(/[^\w.-]/g, "_")}.json`);
 
-function parseBounds(b) {
+export function parseBounds(b) {
   const m = b.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
   if (!m) return null;
   const [, x1, y1, x2, y2] = m.map(Number);
@@ -92,7 +110,8 @@ function dumpViaFile(serial) {
   return adbRaw(serial, ["shell", "cat", "/sdcard/droid-dump.xml"]);
 }
 
-export function hasDumper(serial) {
+export async function hasDumper(serial) {
+  if (LINK) return true; // the Link app reads the tree itself; no dumper needed
   try {
     const out = adbRaw(serial, ["shell", "pm", "list", "instrumentation"]);
     return out.includes(`${DUMPER_PACKAGE}.test/`);
@@ -101,7 +120,8 @@ export function hasDumper(serial) {
   }
 }
 
-export function installDumper(serial) {
+export async function installDumper(serial) {
+  if (LINK) return true;
   if (!existsSync(DUMPER_TEST) || !existsSync(DUMPER_APP)) {
     throw new Error(
       `Dumper APKs not vendored at ${VENDOR}. Rebuild from skills/droid/dumper ` +
@@ -111,13 +131,22 @@ export function installDumper(serial) {
   // App must exist before its instrumentation can target it.
   execFileSync("adb", ["-s", serial, "install", "-r", DUMPER_APP], { stdio: "ignore" });
   execFileSync("adb", ["-s", serial, "install", "-r", DUMPER_TEST], { stdio: "ignore" });
-  return hasDumper(serial);
+  return hasDumperSync(serial);
+}
+
+function hasDumperSync(serial) {
+  try {
+    const out = adbRaw(serial, ["shell", "pm", "list", "instrumentation"]);
+    return out.includes(`${DUMPER_PACKAGE}.test/`);
+  } catch {
+    return false;
+  }
 }
 
 function dumpViaInstrumentation(serial) {
   // Primary transport: animation-proof. Returns "" if the dumper isn't
   // installed so dumpXml can fall through to the legacy transports.
-  if (!hasDumper(serial)) return "";
+  if (!hasDumperSync(serial)) return "";
   const out = adbRaw(serial, [
     "shell",
     "am",
@@ -135,7 +164,8 @@ function dumpViaInstrumentation(serial) {
   return out.slice(start + DUMP_BEGIN.length, end);
 }
 
-function dumpXml(serial) {
+async function dumpXml(serial) {
+  if (LINK) return LINK.dumpXml(serial);
   // Instrumentation dumper first (works mid-animation); then the legacy
   // uiautomator transports, which silently return empty when the UI isn't idle
   // (Fast Refresh, transitions). Retry across all three before giving up.
@@ -158,11 +188,24 @@ function dumpXml(serial) {
   throw err;
 }
 
-function allNodes(xml) {
+// Both uiautomator and the Link app XML-escape attribute values; decode them so
+// names read "Network & internet" (and text targeting matches what's on screen).
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+function unescapeXml(v) {
+  return v.indexOf("&") === -1
+    ? v
+    : v.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (m, e) =>
+        e[0] === "#"
+          ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : Number(e.slice(1)))
+          : ENTITIES[e.toLowerCase()],
+      );
+}
+
+export function allNodes(xml) {
   const nodes = [];
   for (const tag of xml.match(/<node\b[^>]*>/g) || []) {
     const attrs = {};
-    for (const [, k, v] of tag.matchAll(/([\w-]+)="([^"]*)"/g)) attrs[k] = v;
+    for (const [, k, v] of tag.matchAll(/([\w-]+)="([^"]*)"/g)) attrs[k] = unescapeXml(v);
     const bounds = parseBounds(attrs.bounds || "");
     if (!bounds) continue;
     nodes.push({ ...attrs, bounds });
@@ -187,7 +230,7 @@ function label(n) {
 }
 
 // Best human-readable name: own text/desc, else nearest descendant text.
-function nameFor(n, all) {
+export function nameFor(n, all) {
   const own = (n.content_desc || n["content-desc"] || n.text || "").trim();
   if (own) return own;
   const inside = all.find(
@@ -202,18 +245,23 @@ function nameFor(n, all) {
   return inside ? inside.text.trim() : "";
 }
 
-export function snapshot(serial) {
+export async function snapshot(serial) {
   // Self-heal: if the only reason the dump failed is a never-idle animation and
   // the animation-proof dumper isn't installed yet, install it and retry once.
   let xml;
   try {
-    xml = dumpXml(serial);
+    xml = await dumpXml(serial);
   } catch (e) {
-    if (e.code === "UI_ANIMATED" && !hasDumper(serial)) {
-      installDumper(serial);
-      xml = dumpXml(serial);
+    if (e.code === "UI_ANIMATED" && !(await hasDumper(serial))) {
+      await installDumper(serial);
+      xml = await dumpXml(serial);
     } else throw e;
   }
+  return refsFromXml(serial, xml);
+}
+
+// Pure: hierarchy XML → ref list (+ writes the per-device ref cache).
+export function refsFromXml(serial, xml) {
   const all = allNodes(xml);
   const refs = [];
   for (const n of all) {
@@ -238,10 +286,10 @@ export function snapshot(serial) {
   return refs;
 }
 
-function loadRef(serial, ref) {
+async function loadRef(serial, ref) {
   // Self-heal: auto-snapshot if there's no cache yet, so `tap @e3` works even
   // when the agent skipped an explicit `snapshot`.
-  if (!existsSync(cachePath(serial))) snapshot(serial);
+  if (!existsSync(cachePath(serial))) await snapshot(serial);
   const { refs } = JSON.parse(readFileSync(cachePath(serial), "utf8"));
   const found = refs.find((r) => r.ref === ref || r.ref === ref.replace(/^@/, ""));
   if (!found) throw new Error(`Unknown ref ${ref} — re-run \`droid snapshot\`.`);
@@ -253,8 +301,8 @@ function loadRef(serial, ref) {
 // (case-insensitive). Lets an agent act in one call without the
 // snapshot→read→pick-ref→act round-trip. Prefers the most specific (shortest)
 // matching name when several match.
-export function resolveByText(serial, query) {
-  const refs = snapshot(serial);
+export async function resolveByText(serial, query) {
+  const refs = await snapshot(serial);
   const q = query.toLowerCase();
   const matches = refs.filter((r) => (r.name || "").toLowerCase().includes(q));
   if (matches.length === 0) {
@@ -266,8 +314,12 @@ export function resolveByText(serial, query) {
 }
 
 // Re-dump and re-find the ref's node by identity; return its CURRENT center.
-function resolveLive(serial, refObj) {
-  const all = allNodes(dumpXml(serial));
+async function resolveLive(serial, refObj) {
+  return matchLive(allNodes(await dumpXml(serial)), refObj);
+}
+
+// Pure: find a ref's node in a fresh node list by identity.
+export function matchLive(all, refObj) {
   const sig = refObj.sig;
   const candidates = all.filter(
     (n) =>
@@ -287,7 +339,7 @@ function resolveLive(serial, refObj) {
   return { cx: c.cx, cy: c.cy, stale: false };
 }
 
-export function targetFor(serial, refOrXY) {
+export async function targetFor(serial, refOrXY) {
   // `tap X Y` — two integer args → raw coordinates.
   if (refOrXY.length === 2 && refOrXY.every((v) => /^\d+$/.test(v))) {
     return { cx: Number(refOrXY[0]), cy: Number(refOrXY[1]), stale: false };
@@ -295,36 +347,46 @@ export function targetFor(serial, refOrXY) {
   const a = refOrXY[0];
   // `tap @e3` / `tap e3` — a ref → re-resolve its live bounds by identity.
   if (/^@?e\d+$/.test(a)) {
-    const refObj = loadRef(serial, a);
-    return { ...resolveLive(serial, refObj), ref: refObj.ref, name: refObj.name };
+    const refObj = await loadRef(serial, a);
+    return { ...(await resolveLive(serial, refObj)), ref: refObj.ref, name: refObj.name };
   }
   // `tap "Sign In"` — anything else is a visible-text query.
   return resolveByText(serial, refOrXY.join(" "));
 }
 
-export function tap(serial, target) {
+export async function tap(serial, target) {
+  if (LINK) return LINK.call(serial, "tap", { x: target.cx, y: target.cy });
   adbRaw(serial, ["shell", "input", "tap", String(target.cx), String(target.cy)]);
 }
 
-export function clearFocused(serial, approxLen = 60) {
+export async function clearFocused(serial, approxLen = 60) {
+  if (LINK) return LINK.call(serial, "clear");
   // Move to end, then a single batched keyevent of N deletes (one adb round-trip).
   const dels = Array(approxLen).fill(KEYS.DEL);
   adbRaw(serial, ["shell", "input", "keyevent", String(KEYS.MOVE_END), ...dels.map(String)]);
 }
 
-export function typeText(serial, text) {
+export async function typeText(serial, text) {
+  // Link sets the text through accessibility, so any Unicode (accents, emoji) works.
+  if (LINK) return LINK.call(serial, "type", { text });
   // adb `input text` treats spaces specially → encode as %s. Args are passed
   // argv-style (no shell), so no further quoting needed for ASCII payloads.
   adbRaw(serial, ["shell", "input", "text", text.replace(/ /g, "%s")]);
 }
 
-export function key(serial, name) {
+export async function key(serial, name) {
+  if (LINK) return LINK.call(serial, "key", { name: String(name).toUpperCase() });
   const code = KEYS[name.toUpperCase()] ?? Number(name);
   if (!Number.isFinite(code)) throw new Error(`Unknown key: ${name}`);
   adbRaw(serial, ["shell", "input", "keyevent", String(code)]);
 }
 
-export function swipe(serial, dir) {
+export async function swipe(serial, dir) {
+  // Link computes the gesture from the phone's real screen size.
+  if (LINK) {
+    if (!["up", "down", "left", "right"].includes(dir)) throw new Error(`swipe dir must be up|down|left|right`);
+    return LINK.call(serial, "swipe", { dir });
+  }
   const moves = {
     up: [700, 1800, 700, 600],
     down: [700, 600, 700, 1800],
@@ -336,13 +398,19 @@ export function swipe(serial, dir) {
   adbRaw(serial, ["shell", "input", "swipe", ...m.map(String), "300"]);
 }
 
-export function currentFocus(serial) {
+export async function currentFocus(serial) {
+  if (LINK) return (await LINK.call(serial, "current")) || "unknown";
   const out = adbRaw(serial, ["shell", "dumpsys", "window"]);
   const m = out.match(/mCurrentFocus=Window\{[^}]*\s+([^\s}]+)\}/);
   return m ? m[1] : "unknown";
 }
 
-export function screenshot(serial, file) {
+export async function screenshot(serial, file) {
+  if (LINK) {
+    const r = await LINK.call(serial, "screenshot", { format: "png" });
+    writeFileSync(file, Buffer.from(r.data, "base64"));
+    return file;
+  }
   const png = execFileSync("adb", ["-s", serial, "exec-out", "screencap", "-p"], {
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -354,21 +422,27 @@ export async function waitFor(serial, needle, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   const want = needle.toLowerCase();
   while (Date.now() < deadline) {
-    const xml = dumpXml(serial);
+    const xml = await dumpXml(serial);
     if (xml.toLowerCase().includes(want)) return true;
     await new Promise((r) => setTimeout(r, 600));
   }
   return false;
 }
 
-export function devicesList() {
+export async function devicesList() {
+  if (LINK) return LINK.devicesList();
   return execFileSync("adb", ["devices"], { encoding: "utf8" }).trim();
 }
 
 // App logcat — animation-proof, unlike uiautomator. `tag` selects the logcat
 // tag (default ReactNativeJS for RN apps; pass "*" for all tags). Optional
 // regex `filter` and `tail` count.
-export function readLogs(serial, { tag = DEFAULT_LOG_TAG, filter, tail = 40 } = {}) {
+export async function readLogs(serial, { tag = DEFAULT_LOG_TAG, filter, tail = 40 } = {}) {
+  if (LINK) {
+    throw new Error(
+      "`logs` needs adb (Android only lets the shell read logcat). Use remote adb: --remote adb://<phone-ip>:5555",
+    );
+  }
   const out = adbRaw(serial, ["logcat", "-d", "-s", `${tag}:*`]);
   let lines = out.split("\n").filter(Boolean);
   if (filter) {
@@ -376,4 +450,27 @@ export function readLogs(serial, { tag = DEFAULT_LOG_TAG, filter, tail = 40 } = 
     lines = lines.filter((l) => re.test(l));
   }
   return lines.slice(-tail).join("\n");
+}
+
+// Open an app by package name, or any URL / deep link. Works on both transports.
+export async function openTarget(serial, target) {
+  if (LINK) return LINK.call(serial, "open", { target });
+  if (/^[a-z][\w+.-]*:/i.test(target)) {
+    adbRaw(serial, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", target]);
+  } else {
+    adbRaw(serial, ["shell", "monkey", "-p", target, "-c", "android.intent.category.LAUNCHER", "1"]);
+  }
+}
+
+// Turn the screen on (it can't unlock a PIN/pattern — that's the human's job).
+export async function wake(serial) {
+  if (LINK) return LINK.call(serial, "wake");
+  adbRaw(serial, ["shell", "input", "keyevent", "224"]); // KEYCODE_WAKEUP
+}
+
+// Device facts (model, Android version, screen size, battery) for `doctor`.
+export async function deviceInfo(serial) {
+  if (LINK) return LINK.call(serial, "info");
+  const prop = (k) => adbRaw(serial, ["shell", "getprop", k]).trim();
+  return { model: prop("ro.product.model"), android: prop("ro.build.version.release"), sdk: Number(prop("ro.build.version.sdk")) };
 }
