@@ -2,7 +2,7 @@ name: remote mode
 
 on:
   push:
-    branches: [main, feat/remote-mode]
+    branches: [master, feat/remote-mode]
   pull_request:
   workflow_dispatch:
 

@@ -84,7 +84,7 @@ Invariants for remote mode:
 Building the Link APK locally: `cd link && ./gradlew :app:assembleRelease`
 (JDK 17 + Android SDK; signed with the debug key unless `LINK_KEYSTORE_FILE` /
 `LINK_KEYSTORE_PASSWORD` are set). CI builds and signs it from repo secrets and
-publishes it to the `link-latest` release on every push to `main`.
+publishes it to the `link-latest` release on every push to `master`.
 
 Tests: `node --test test/*.test.mjs` (parser, ws framing, relay + fake phone +
 real CLI). `test/e2e-emulator.sh` runs the real APK on an Android 12 emulator in
